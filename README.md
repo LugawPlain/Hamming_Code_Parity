@@ -33,8 +33,3 @@ The simulation uses a **(15,11) Hamming Code** extended to 16 bits with an overa
     - **Double Error**: If you flip two bits, the system will detect a "Double Bit Error" (but cannot correct it).
 4.  **Explore**: Click on the parity rules in the bottom panel to highlight the specific bits that each rule checks.
 
-## Technologies
-- **HTML5**
-- **JavaScript (ES6)**
-- **Tailwind CSS** (for styling)
-- **Google Fonts** (JetBrains Mono)
