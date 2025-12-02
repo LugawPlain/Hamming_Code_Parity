@@ -23,13 +23,32 @@
             box-shadow: 2px 2px 0px rgba(0,0,0,0.2);
         }
 
-        /* Hover effect to show dependencies could be added here */
         .bit-cell:hover {
             filter: brightness(1.1);
         }
 
         .animate-pop {
             animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        /* Styling for the scope highlight */
+        .scope-highlight {
+            box-shadow: inset 0 0 0 4px #FACC15 !important; /* Yellow-400 */
+            transform: scale(1.05);
+            z-index: 20;
+        }
+
+        /* Styling for the interactive list items */
+        .parity-row {
+            transition: background-color 0.2s;
+        }
+        .parity-row:hover {
+            background-color: rgba(51, 65, 85, 0.8); /* slate-700 */
+        }
+        .parity-row.active-row {
+            background-color: rgba(51, 65, 85, 1);
+            border-left: 4px solid #FACC15;
+            padding-left: 12px; /* Adjust for border */
         }
 
         @keyframes pop {
@@ -46,7 +65,7 @@
         <!-- Header -->
         <div class="text-center space-y-2">
             <h1 class="text-3xl font-bold text-emerald-400">Hamming Code (15,11) Visualizer</h1>
-            <p class="text-slate-400">Click any bit to flip it (simulate data corruption). The parity logic will hunt it down.</p>
+            <p class="text-slate-400">Click a bit to flip it. <span class="text-yellow-400">Click a parity rule below to see its scope.</span></p>
         </div>
 
         <!-- Main Content Grid -->
@@ -70,6 +89,7 @@
                     <div class="flex items-center gap-2"><div class="w-4 h-4 bg-slate-600 rounded"></div> Data Bit</div>
                     <div class="flex items-center gap-2"><div class="w-4 h-4 bg-cyan-700 rounded"></div> Parity Bit</div>
                     <div class="flex items-center gap-2"><div class="w-4 h-4 border-2 border-red-500 rounded"></div> Detected Error</div>
+                    <div class="flex items-center gap-2"><div class="w-4 h-4 border-4 border-yellow-400 rounded"></div> Scope</div>
                 </div>
             </div>
 
@@ -85,7 +105,8 @@
                 <!-- Parity Breakdown -->
                 <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
                     <h3 class="font-bold text-slate-300 mb-4 border-b border-slate-700 pb-2">Parity Check Breakdown</h3>
-                    <div class="space-y-3 text-sm" id="parity-details">
+                    <p class="text-xs text-slate-500 mb-3 italic">Click a row to highlight checked bits</p>
+                    <div class="space-y-1 text-sm" id="parity-details">
                         <!-- Details injected by JS -->
                     </div>
                 </div>
@@ -109,16 +130,11 @@
     <script>
         // Configuration
         const TOTAL_BITS = 16;
-        const PARITY_POSITIONS = [1, 2, 4, 8]; // Powers of 2
-        // Position 0 is usually overall parity in extended Hamming, we will include it in logic but focus on 1-15 correction
+        const PARITY_POSITIONS = [1, 2, 4, 8]; 
         
         let bits = new Array(TOTAL_BITS).fill(0);
+        let activeHighlightGroup = null; // Stores which parity group is currently highlighted (0, 1, 2, 4, 8)
 
-        // Indices covered by each parity bit (standard Hamming construction)
-        // P1 covers binary xxxx1 (1, 3, 5, 7, 9, 11, 13, 15)
-        // P2 covers binary xxx1x (2, 3, 6, 7, 10, 11, 14, 15)
-        // P4 covers binary xx1xx (4, 5, 6, 7, 12, 13, 14, 15)
-        // P8 covers binary x1xxx (8, 9, 10, 11, 12, 13, 14, 15)
         const parityGroups = {
             1: [1, 3, 5, 7, 9, 11, 13, 15],
             2: [2, 3, 6, 7, 10, 11, 14, 15],
@@ -134,38 +150,25 @@
             return PARITY_POSITIONS.includes(index) || index === 0;
         }
 
-        // Calculate correct parity bits based on current data bits
         function recalculateParityBits() {
-            // We only calculate parity for indices 1, 2, 4, 8 based on data
-            // We do NOT change data bits here, this is for the "Correct" state
-            // NOTE: In this simulation, we don't auto-fix the parity bits after initialization
-            // because we want the user to be able to break them.
-            // This function is used strictly during 'Reset' or 'Randomize'.
-            
-            // 1. Clear parity bits
             PARITY_POSITIONS.forEach(p => bits[p] = 0);
             bits[0] = 0;
 
-            // 2. Calculate P1, P2, P4, P8
             PARITY_POSITIONS.forEach(p => {
                 let count = 0;
                 parityGroups[p].forEach(index => {
-                    // Start checking from the parity bit itself (which is currently 0)
-                    // The standard algorithm: Sum of all bits in group must be even (0).
-                    // So Parity Bit = XOR sum of Data Bits in group.
                     if (index !== p && bits[index] === 1) count++;
                 });
                 bits[p] = (count % 2 === 0) ? 0 : 1;
             });
 
-            // 3. Optional: Calculate overall parity (bit 0)
             let totalSum = 0;
             for(let i=1; i<16; i++) totalSum += bits[i];
             bits[0] = (totalSum % 2 === 0) ? 0 : 1;
         }
 
         function randomizeData() {
-            // Randomize only non-parity spots
+            activeHighlightGroup = null; // Clear highlight on randomize
             for (let i = 0; i < TOTAL_BITS; i++) {
                 if (!isParityBit(i)) {
                     bits[i] = Math.random() > 0.5 ? 1 : 0;
@@ -177,6 +180,7 @@
         }
 
         function resetGrid() {
+            activeHighlightGroup = null;
             bits.fill(0);
             render();
             checkErrors();
@@ -188,12 +192,23 @@
             checkErrors();
         }
 
+        // NEW: Function to handle toggling the visual scope
+        function toggleScopeHighlight(groupIndex) {
+            if (activeHighlightGroup === groupIndex) {
+                activeHighlightGroup = null; // Toggle off if already selected
+            } else {
+                activeHighlightGroup = groupIndex;
+            }
+            render();
+            checkErrors(); // Re-render text list to update active row styling
+        }
+
         function checkErrors() {
             let syndrome = 0;
             let logHTML = "";
             let overallSum = 0;
 
-            // 1. Check Standard Hamming Groups (Syndrome Calculation)
+            // 1. Check Standard Hamming Groups
             PARITY_POSITIONS.forEach(p => {
                 let sum = 0;
                 parityGroups[p].forEach(idx => sum += bits[idx]);
@@ -202,45 +217,48 @@
                 const statusColor = isOdd ? "text-red-400 font-bold" : "text-emerald-400";
                 const statusText = isOdd ? "FAIL (Odd)" : "PASS (Even)";
                 
-                if (isOdd) {
-                    syndrome += p;
-                }
+                if (isOdd) syndrome += p;
+
+                // Highlight active row in the list
+                const rowClass = (activeHighlightGroup === p) ? "parity-row active-row" : "parity-row";
 
                 logHTML += `
-                    <div class="flex justify-between items-center border-b border-slate-700/50 pb-1">
+                    <div class="${rowClass} flex justify-between items-center p-2 rounded cursor-pointer select-none" onclick="toggleScopeHighlight(${p})">
                         <span><span class="text-cyan-400 font-bold">P${p}</span> checks: ${parityGroups[p].join(', ')}</span>
                         <span class="${statusColor}">${statusText}</span>
                     </div>
                 `;
             });
 
-            // 2. Check Overall Parity (Bit 0 covers everything)
+            // 2. Check Overall Parity
             bits.forEach(b => overallSum += b);
             const overallParityFail = overallSum % 2 !== 0;
+            const rowClass0 = (activeHighlightGroup === 0) ? "parity-row active-row" : "parity-row";
 
             logHTML += `
-                <div class="flex justify-between items-center border-b border-slate-700/50 pb-1 mt-2">
+                <div class="${rowClass0} flex justify-between items-center p-2 rounded cursor-pointer mt-2 select-none" onclick="toggleScopeHighlight(0)">
                     <span><span class="text-blue-400 font-bold">P0</span> (Overall): All Bits</span>
                     <span class="${overallParityFail ? 'text-red-400 font-bold' : 'text-emerald-400'}">${overallParityFail ? 'FAIL (Odd)' : 'PASS (Even)'}</span>
                 </div>
             `;
 
-            // 3. Determine Error State based on Syndrome + Overall Parity
+            // 3. Determine Error State
             const statusPanel = document.getElementById('status-panel');
             const statusMessage = document.getElementById('status-message');
             
-            // Clear highlights
+            // Note: We don't clear all styling here anymore because render() handles the scope highlights.
+            // We just need to handle the red error ring.
+            
+            // Remove OLD error rings first (keep scope highlights)
             document.querySelectorAll('.bit-cell').forEach(el => {
                 el.classList.remove('ring-4', 'ring-red-500', 'z-10');
+                // Ensure scope highlight remains if active (handled by render, but let's be safe)
             });
 
             if (syndrome === 0 && !overallParityFail) {
-                // CASE: NO ERROR
                 statusPanel.className = "bg-emerald-900/20 p-6 rounded-xl border border-emerald-500/50 transition-colors duration-300";
                 statusMessage.innerHTML = `<span class="text-emerald-400">✓ Data Integrity Verified. No errors.</span>`;
-            
             } else if (syndrome !== 0 && overallParityFail) {
-                // CASE: SINGLE ERROR (Correctable)
                 statusPanel.className = "bg-red-900/20 p-6 rounded-xl border border-red-500/50 transition-colors duration-300 animate-pulse";
                 statusMessage.innerHTML = `
                     <div class="flex flex-col">
@@ -249,12 +267,10 @@
                         <span class="text-sm">Logic identifies Bit #${syndrome} as corrupted.</span>
                     </div>
                 `;
-                // Highlight the error cell
                 const errorCell = document.getElementById(`cell-${syndrome}`);
                 if (errorCell) errorCell.classList.add('ring-4', 'ring-red-500', 'z-10');
 
             } else if (syndrome === 0 && overallParityFail) {
-                // CASE: ERROR AT BIT 0
                 statusPanel.className = "bg-red-900/20 p-6 rounded-xl border border-red-500/50 transition-colors duration-300 animate-pulse";
                 statusMessage.innerHTML = `
                     <div class="flex flex-col">
@@ -263,12 +279,10 @@
                         <span class="text-sm">The Overall Parity Bit (Bit #0) is corrupted.</span>
                     </div>
                 `;
-                 // Highlight Bit 0
                  const errorCell = document.getElementById(`cell-0`);
                  if (errorCell) errorCell.classList.add('ring-4', 'ring-red-500', 'z-10');
 
             } else if (syndrome !== 0 && !overallParityFail) {
-                // CASE: DOUBLE ERROR (Uncorrectable)
                 statusPanel.className = "bg-orange-900/20 p-6 rounded-xl border border-orange-500/50 transition-colors duration-300";
                 statusMessage.innerHTML = `
                     <div class="flex flex-col">
@@ -277,7 +291,6 @@
                         <span class="text-sm">Two bits are flipped. Correction impossible. Location aliased to #${syndrome}.</span>
                     </div>
                 `;
-                // We do NOT highlight the cell because the syndrome points to the wrong place in a double error
             }
 
             document.getElementById('parity-details').innerHTML = logHTML;
@@ -291,20 +304,18 @@
                 const el = document.createElement('div');
                 el.id = `cell-${index}`;
                 
-                // Styling classes based on bit type
-                let bgClass = "bg-slate-600"; // Data default
+                let bgClass = "bg-slate-600"; 
                 let textClass = "text-slate-200";
                 let label = "D";
 
                 if (index === 0) {
                     bgClass = "bg-blue-900";
-                    label = "OP"; // Overall Parity
+                    label = "OP"; 
                 } else if (PARITY_POSITIONS.includes(index)) {
                     bgClass = "bg-cyan-700";
                     label = `P${index}`;
                 }
 
-                // If bit is 1, make it slightly brighter/different to indicate value visually beyond the number
                 if (bitVal === 1) {
                     textClass = "text-white font-bold";
                 } else {
@@ -313,6 +324,26 @@
 
                 el.className = `bit-cell ${bgClass} rounded-lg flex flex-col items-center justify-center relative select-none animate-pop`;
                 el.onclick = () => toggleBit(index);
+
+                // --- SCOPE HIGHLIGHT LOGIC ---
+                if (activeHighlightGroup !== null) {
+                    let shouldHighlight = false;
+                    
+                    if (activeHighlightGroup === 0) {
+                        // P0 checks everyone
+                        shouldHighlight = true;
+                    } else if (parityGroups[activeHighlightGroup] && parityGroups[activeHighlightGroup].includes(index)) {
+                        // Standard parity groups check specific indices
+                        shouldHighlight = true;
+                    }
+
+                    if (shouldHighlight) {
+                        el.classList.add('scope-highlight');
+                    } else {
+                        // Optional: Dim bits that aren't involved to make highlight pop more
+                        el.style.opacity = '0.3';
+                    }
+                }
 
                 el.innerHTML = `
                     <span class="absolute top-1 left-2 text-[10px] uppercase opacity-50 tracking-wider">${index}</span>
@@ -324,7 +355,6 @@
             });
         }
 
-        // Start
         init();
 
     </script>
